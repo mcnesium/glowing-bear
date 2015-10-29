@@ -218,7 +218,6 @@ input[type=text], input[type=password], #sendMessage, .badge, .btn-send {
 }
 .cof-chat_highlight {
     color: #ffe377;
-    background-color: #c8a0d1;
 }
 .cof-chat_read_marker {
     color: #fbb1f9;
@@ -308,7 +307,6 @@ input[type=text], input[type=password], #sendMessage, .badge, .btn-send {
 .cob-chat_delimiters {
 }
 .cob-chat_highlight {
-    background-color: #c8a0d1;
 }
 .cob-chat_read_marker {
 }
