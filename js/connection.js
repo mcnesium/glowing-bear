@@ -20,7 +20,7 @@ weechat.factory('connection',
         connectionData = [host, port, passwd, ssl, noCompression];
         var proto = ssl ? 'wss' : 'ws';
         // If host is an IPv6 literal wrap it in brackets
-        if (host.indexOf(":") !== -1) {
+        if (host.indexOf(":") !== -1 && host[0] !== "[" && host[host.length-1] !== "]") {
             host = "[" + host + "]";
         }
         var url = proto + "://" + host + ":" + port + "/weechat";
@@ -62,7 +62,7 @@ weechat.factory('connection',
                 return ngWebsockets.send(
                     weeChat.Protocol.formatHdata({
                         path: 'buffer:gui_buffers(*)',
-                        keys: ['local_variables,notify,number,full_name,short_name,title,hidden']
+                        keys: ['local_variables,notify,number,full_name,short_name,title,hidden,type']
                     })
                 );
             };
@@ -282,10 +282,13 @@ weechat.factory('connection',
     };
 
     var requestNicklist = function(bufferId, callback) {
-        bufferId = bufferId || null;
+        // Prevent requesting nicklist for all buffers if bufferId is invalid
+        if (!bufferId) {
+            return;
+        }
         ngWebsockets.send(
             weeChat.Protocol.formatNicklist({
-                buffer: bufferId
+                buffer: "0x"+bufferId
             })
         ).then(function(nicklist) {
             handlers.handleNicklist(nicklist);

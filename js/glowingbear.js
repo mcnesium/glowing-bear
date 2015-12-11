@@ -168,7 +168,7 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
 
         // Send a request for the nicklist if it hasn't been loaded yet
         if (!ab.nicklistRequested()) {
-            connection.requestNicklist(ab.fullName, function() {
+            connection.requestNicklist(ab.id, function() {
                 $scope.showNicklist = $scope.updateShowNicklist();
                 // Scroll after nicklist has been loaded, as it may break long lines
                 $rootScope.scrollWithBuffer(true);
@@ -214,8 +214,10 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
             );
         }
         notifications.updateTitle(ab);
-        $scope.notifications = notifications.unreadCount('notification');
-        $scope.unread = notifications.unreadCount('unread');
+        setTimeout(function(){
+            $scope.notifications = notifications.unreadCount('notification');
+            $scope.unread = notifications.unreadCount('unread');
+        });
 
         $timeout(function() {
             $rootScope.scrollWithBuffer(true);
@@ -725,6 +727,18 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
         settings.nonicklist = !settings.nonicklist;
     };
 
+    $rootScope.switchToAdjacentBuffer = function(direction) {
+        // direction is +1 for next buffer, -1 for previous buffer
+        var sortedBuffers = _.sortBy($scope.getBuffers(), $rootScope.predicate);
+        var activeBuffer = models.getActiveBuffer();
+        var index = sortedBuffers.indexOf(activeBuffer);
+        if (index >= 0) {
+            var newBuffer = sortedBuffers[index + direction];
+            if (newBuffer) {
+                $scope.setActiveBuffer(newBuffer.id);
+            }
+        }
+    };
 
     $scope.handleSearchBoxKey = function($event) {
         // Support different browser quirks

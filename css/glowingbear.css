@@ -29,6 +29,7 @@ td.prefix {
     border-right: 1px solid #444;
 }
 td.message {
+    overflow: hidden;
     vertical-align: top;
     width: 100%;
     padding: 1px 1px 1px 5px;
@@ -82,6 +83,25 @@ input[type=text], input[type=password], #sendMessage {
     border: 0;
     border-radius: 0;
     margin-bottom: 5px !important;
+}
+
+.btn-send-image {
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.imgur-upload {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    cursor: inherit;
+    font-size: 1000px !important;
+    height: 300px;
+    margin: 0;
+    padding: 0;
+    opacity: 0;
+    filter: ~"alpha(opacity=0)";
 }
 
 .input-group {
@@ -155,6 +175,14 @@ input[type=text], input[type=password], #sendMessage {
 #topbar .dropdown-menu form {
     padding-left: 6px;
     padding-right: 6px;
+}
+
+.upload-error {
+    width: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 4;
 }
 
 #sidebar {
@@ -329,6 +357,25 @@ td.time {
 .footer.withnicklist {
     padding-right: 100px;
 }
+
+#inputform {
+    position: relative;
+}
+
+#imgur-upload-progress {
+    width: 100%;
+    height: auto;
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+}
+
+    .imgur-progress-bar {
+        width: 0%;
+        height: 5px;
+        margin-top: 1px;
+        background: #428BCA;
+    }
 
 /* fix for mobile firefox which ignores :hover */
 .nav-pills > li > a:active, .nav-pills > li > a:active span {
@@ -726,7 +773,13 @@ img.emojione {
         padding-bottom: 0;
     }
 
+    #bufferlines tr.bufferline {
+        display: block;
+        overflow: hidden;
+    }
+
     #bufferlines td.time {
+        display: inline-block;
         padding-right: 3px;
         font-size: 0.8em;
     }
