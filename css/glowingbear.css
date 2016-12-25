@@ -15,6 +15,10 @@ a {
     cursor: pointer;
 }
 
+.version {
+   margin-right: 1em;
+}
+
 .hidden-bracket {
   position: absolute;
   left: -1000px;
@@ -212,7 +216,13 @@ input[type=text], input[type=password], #sendMessage {
   display:block!important;
 }
 
-#sidebar .badge {
+
+#sidebar .buffer .badge {
+   display: none;
+}
+
+#sidebar .buffer.unread .badge, #sidebar .buffer.notification .badge {
+    display: inline-block;
     border-radius: 0;
     margin-right: -10px;
     padding: 4px 7px;
@@ -279,6 +289,12 @@ input[type=text], input[type=password], #sendMessage {
     text-decoration: none;
     background-color: #eee;
     color: #222;
+}
+
+.nav-pills > li.highlight > a, .nav-pills > li.highlight > a span {
+    text-decoration: none;
+    color: #fff;
+    background: #428BCA;
 }
 
 .nav-pills > li > a {
@@ -370,12 +386,12 @@ td.time {
     left: 0;
 }
 
-    .imgur-progress-bar {
-        width: 0%;
-        height: 5px;
-        margin-top: 1px;
-        background: #428BCA;
-    }
+.imgur-progress-bar {
+    width: 0%;
+    height: 5px;
+    margin-top: 1px;
+    background: #428BCA;
+}
 
 /* fix for mobile firefox which ignores :hover */
 .nav-pills > li > a:active, .nav-pills > li > a:active span {
@@ -419,14 +435,6 @@ div.colourbox {
     margin-bottom: -2px;
 }
 
-
-table.notimestamp td.time {
-    display: none !important;
-}
-
-table.notimestampseconds td.time span.seconds {
-    display: none !important;
-}
 
 #sidebar .showquickkeys .buffer .buffer-quick-key {
     transition: all ease-in-out 0.5s;
@@ -594,11 +602,7 @@ li.buffer.channel_ampersand a span:last-of-type:before, #topbar .title .channel_
 }
 
 li.buffer.channel.active a span:last-of-type:before {
-    color: #444;
-}
-
-li.buffer.channel.active a:hover span:last-of-type:before {
-    color: #222;
+    color: #aaa;
 }
 
 li.buffer.indent.private a {
@@ -636,6 +640,31 @@ li.buffer.indent.private a {
 }
 img.emojione {
     width: auto;
+}
+
+.glyphicon-spin {
+  -webkit-animation: spin 1000ms infinite linear;
+  animation: spin 1000ms infinite linear;
+}
+@-webkit-keyframes spin {
+  0% {
+    -webkit-transform: rotate(0deg);
+    transform: rotate(0deg);
+  }
+  100% {
+    -webkit-transform: rotate(359deg);
+    transform: rotate(359deg);
+  }
+}
+@keyframes spin {
+  0% {
+    -webkit-transform: rotate(0deg);
+    transform: rotate(0deg);
+  }
+  100% {
+    -webkit-transform: rotate(359deg);
+    transform: rotate(359deg);
+  }
 }
 
 @media (min-width: 1400px) {

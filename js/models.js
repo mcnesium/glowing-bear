@@ -7,9 +7,12 @@
 
 var models = angular.module('weechatModels', []);
 
-models.service('models', ['$rootScope', '$filter', function($rootScope, $filter) {
+models.service('models', ['$rootScope', '$filter', 'bufferResume', function($rootScope, $filter, bufferResume) {
     // WeeChat version
     this.version = null;
+
+    // WeeChat configuration values
+    this.wconfig = {};
 
     // Save outgoing queries
     this.outgoingQueries = [];
@@ -92,6 +95,9 @@ models.service('models', ['$rootScope', '$filter', function($rootScope, $filter)
 
         var plugin = message.local_variables.plugin;
         var server = message.local_variables.server;
+
+        var pinned = message.local_variables.pinned === "true";
+
         // Server buffers have this "irc.server.freenode" naming schema, which
         // messes the sorting up. We need it to be "irc.freenode" instead.
         var serverSortKey = plugin + "." + server +
@@ -332,7 +338,8 @@ models.service('models', ['$rootScope', '$filter', function($rootScope, $filter)
             getHistoryUp: getHistoryUp,
             getHistoryDown: getHistoryDown,
             isNicklistEmpty: isNicklistEmpty,
-            nicklistRequested: nicklistRequested
+            nicklistRequested: nicklistRequested,
+            pinned: pinned,
         };
 
     };
@@ -344,6 +351,7 @@ models.service('models', ['$rootScope', '$filter', function($rootScope, $filter)
         var buffer = message.buffer;
         var date = message.date;
         var shortTime = $filter('date')(date, 'HH:mm');
+        var formattedTime = $filter('date')(date, $rootScope.angularTimeFormat);
 
         var prefix = parseRichText(message.prefix);
         var tags_array = message.tags_array;
@@ -357,20 +365,27 @@ models.service('models', ['$rootScope', '$filter', function($rootScope, $filter)
             });
         }
 
+        var prefixtext = "";
+        for (var pti = 0; pti < prefix.length; ++pti) {
+            prefixtext += prefix[pti].text;
+        }
+
         var rtext = "";
         for (var i = 0; i < content.length; ++i) {
             rtext += content[i].text;
         }
 
-       return {
+        return {
             prefix: prefix,
             content: content,
             date: date,
             shortTime: shortTime,
+            formattedTime: formattedTime,
             buffer: buffer,
             tags: tags_array,
             highlight: highlight,
             displayed: displayed,
+            prefixtext: prefixtext,
             text: rtext
 
         };
@@ -378,33 +393,45 @@ models.service('models', ['$rootScope', '$filter', function($rootScope, $filter)
     };
 
     function nickGetColorClasses(nickMsg, propName) {
+        var colorClasses = [
+            'cwf-default'
+        ];
         if (propName in nickMsg && nickMsg[propName] && nickMsg[propName].length > 0) {
             var color = nickMsg[propName];
             if (color.match(/^weechat/)) {
                 // color option
                 var colorName = color.match(/[a-zA-Z0-9_]+$/)[0];
-                return [
+                colorClasses = [
                     'cof-' + colorName,
                     'cob-' + colorName,
                     'coa-' + colorName
                 ];
-            } else if (color.match(/^[a-zA-Z]+$/)) {
-                // WeeChat color name
-                return [
-                    'cwf-' + color
-                ];
-            } else if (color.match(/^[0-9]+$/)) {
-                // extended color
-                return [
-                    'cef-' + color
-                ];
+            } else {
+                if (color.match(/^[a-zA-Z]+(:|$)/)) {
+                    // WeeChat color name (foreground)
+                    var cwfcolor = color.match(/^[a-zA-Z]+/)[0];
+                    colorClasses = [
+                        'cwf-' + cwfcolor
+                    ];
+                } else if (color.match(/^[0-9]+(:|$)/)) {
+                    // extended color (foreground)
+                    var cefcolor = color.match(/^[0-9]+/)[0];
+                    colorClasses = [
+                        'cef-' + cefcolor
+                    ];
+                }
+                if (color.match(/:[a-zA-Z]+$/)) {
+                    // WeeChat color name (background)
+                    var cwbcolor = color.match(/:[a-zA-Z]+$/)[0].substring(1);
+                    colorClasses.push('cwb-' + cwbcolor);
+                } else if (color.match(/:[0-9]+$/)) {
+                    // extended color (background)
+                    var cebcolor = color.match(/:[0-9]+$/)[0].substring(1);
+                    colorClasses.push('ceb-' + cebcolor);
+                }
             }
-
         }
-
-        return [
-            'cwf-default'
-        ];
+        return colorClasses;
     }
 
     function nickGetClasses(nickMsg) {
@@ -542,6 +569,7 @@ models.service('models', ['$rootScope', '$filter', function($rootScope, $filter)
 
         $rootScope.$emit('activeBufferChanged', unreadSum);
         $rootScope.$emit('notificationChanged');
+        bufferResume.record(activeBuffer);
         return true;
     };
 

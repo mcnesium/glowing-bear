@@ -161,22 +161,37 @@ weechat.filter('getBufferQuickKeys', function () {
 weechat.filter('emojify', function() {
     return function(text, enable_JS_Emoji) {
         if (enable_JS_Emoji === true && window.emojione !== undefined) {
-            return emojione.unicodeToImage(text);
+            // Emoji live in the D800-DFFF surrogate plane; only bother passing
+            // this range to CPU-expensive unicodeToImage();
+            var emojiRegex = /[\uD800-\uDBFF][\uDC00-\uDFFF]/g;
+            if (emojiRegex.test(text)) {
+                return emojione.unicodeToImage(text);
+            } else {
+                return(text);
+            }
         } else {
             return(text);
         }
     };
 });
 
-weechat.filter('mathjax', function() {
+weechat.filter('latexmath', function() {
     return function(text, selector, enabled) {
-        if (!enabled || typeof(MathJax) === "undefined") {
+        if (!enabled || typeof(katex) === "undefined") {
             return text;
         }
         if (text.indexOf("$$") != -1 || text.indexOf("\\[") != -1 || text.indexOf("\\(") != -1) {
-            // contains math
-            var math = document.querySelector(selector);
-            MathJax.Hub.Queue(["Typeset",MathJax.Hub,math]);
+            // contains math -> delayed rendering
+            setTimeout(function() {
+                var math = document.querySelector(selector);
+                renderMathInElement(math, {
+                    delimiters: [
+                        {left: "$$", right: "$$", display: false},
+                        {left: "\\[", right: "\\]", display: true},
+                        {left: "\\(", right: "\\)", display: false}
+                    ]
+                });
+            });
         }
 
         return text;

@@ -10,6 +10,11 @@ body {
     border: 0px none;
 }
 
+.form-control option {
+   color: #eee;
+   background: #282828;
+}
+
 html {
     background-color: inherit;
 }
@@ -28,6 +33,11 @@ html {
 .nav-pills > li > a:active, .nav-pills > li > a:active span, .nav-pills > li.active > a:hover {
     background-color: #eee;
     color: #222;
+}
+
+.nav-pills > li.highlight > a, .nav-pills > li.highlight > a span {
+    color: #fff;
+    background: #428BCA;
 }
 
 tr.bufferline:hover {
@@ -148,6 +158,15 @@ input[type=text], input[type=password], #sendMessage, .badge, .btn-send, .btn-se
 #readmarker {
     border-top-color: rgba(255, 255, 255, 0.3);
     border-bottom-color: #121212;
+}
+
+button.close {
+    color: #ddd;
+    opacity: 1;
+}
+
+button.close:hover {
+    color: #ddd;
 }
 
 /****************************/

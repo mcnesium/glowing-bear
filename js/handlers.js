@@ -3,7 +3,7 @@
 
 var weechat = angular.module('weechat');
 
-weechat.factory('handlers', ['$rootScope', '$log', 'models', 'plugins', 'notifications', function($rootScope, $log, models, plugins, notifications) {
+weechat.factory('handlers', ['$rootScope', '$log', 'models', 'plugins', 'notifications', 'bufferResume', function($rootScope, $log, models, plugins, notifications, bufferResume) {
 
     var handleVersionInfo = function(message) {
         var content = message.objects[0].content;
@@ -13,6 +13,27 @@ weechat.factory('handlers', ['$rootScope', '$log', 'models', 'plugins', 'notific
         models.version = version.split(".").map(function(c) { return parseInt(c); });
     };
 
+    var handleConfValue = function(message) {
+        var infolist = message.objects[0].content;
+        for (var i = 0; i < infolist.length ; i++) {
+            var key, val;
+            var item = infolist[i];
+            for (var j = 0; j < item.length ; j++) {
+                var confitem = item[j];
+                if (confitem.full_name) {
+                    key = confitem.full_name;
+                }
+                if (confitem.value) {
+                    val = confitem.value;
+                }
+            }
+            if (key && val) {
+                $log.debug('Setting wconfig "' + key + '" to value "' + val + '"');
+                models.wconfig[key] = val;
+            }
+        }
+    };
+
     var handleBufferClosing = function(message) {
         var bufferMessage = message.objects[0].content[0];
         var bufferId = bufferMessage.pointers[0];
@@ -20,7 +41,7 @@ weechat.factory('handlers', ['$rootScope', '$log', 'models', 'plugins', 'notific
     };
 
     // inject a fake buffer line for date change if needed
-    var injectDateChangeMessageIfNeeded = function(buffer, old_date, new_date) {
+    var injectDateChangeMessageIfNeeded = function(buffer, manually, old_date, new_date) {
         if (buffer.bufferType === 1) {
             // Don't add date change messages to free buffers
             return;
@@ -29,6 +50,12 @@ weechat.factory('handlers', ['$rootScope', '$log', 'models', 'plugins', 'notific
         new_date.setHours(0, 0, 0, 0);
         // Check if the date changed
         if (old_date.valueOf() !== new_date.valueOf()) {
+            if (manually) {
+                // if the message that caused this date change to be sent
+                // would increment buffer.lastSeen, we should increment as
+                // well.
+                ++buffer.lastSeen;
+            }
             var old_date_plus_one = old_date;
             old_date_plus_one.setDate(old_date.getDate() + 1);
             // it's not always true that a date with time 00:00:00
@@ -37,8 +64,16 @@ weechat.factory('handlers', ['$rootScope', '$log', 'models', 'plugins', 'notific
 
             var content = "\u001943"; // this colour corresponds to chat_day_change
             // Add day of the week
-            content += new_date.toLocaleDateString(window.navigator.language,
-                                                   {weekday: "long"});
+            if ($rootScope.supports_formatting_date) {
+                content += new_date.toLocaleDateString(window.navigator.language,
+                                                       {weekday: "long"});
+            } else {
+                // Gross code that only does English dates ew gross
+                var dow_to_word = [
+                    "Sunday", "Monday", "Tuesday",
+                    "Wednesday", "Thursday", "Friday", "Saturday"];
+                content += dow_to_word[new_date.getDay()];
+            }
             // if you're testing different date formats,
             // make sure to test different locales such as "en-US",
             // "en-US-u-ca-persian" (which has different weekdays, year 0, and an ERA)
@@ -51,8 +86,20 @@ weechat.factory('handlers', ['$rootScope', '$log', 'models', 'plugins', 'notific
                 extra_date_format.year = "numeric";
             }
             content += " (";
-            content += new_date.toLocaleDateString(window.navigator.language,
-                                                   extra_date_format);
+            if ($rootScope.supports_formatting_date) {
+                content += new_date.toLocaleDateString(window.navigator.language,
+                                                       extra_date_format);
+            } else {
+                // ew ew not more gross code
+                var month_to_word = [
+                    "January", "February", "March", "April",
+                    "May", "June", "July", "August",
+                    "September", "October", "November", "December"];
+                content += month_to_word[new_date.getMonth()] + " " + new_date.getDate().toString();
+                if (extra_date_format.year === "numeric") {
+                    content += ", " + new_date.getFullYear().toString();
+                }
+            }
             // Result should be something like
             // Friday (November 27)
             // or if the year is different,
@@ -76,7 +123,7 @@ weechat.factory('handlers', ['$rootScope', '$log', 'models', 'plugins', 'notific
             content += ")";
 
             var line = {
-                buffer: buffer,
+                buffer: buffer.id,
                 date: new_date,
                 prefix: '\u001943\u2500',
                 tags_array: [],
@@ -99,7 +146,7 @@ weechat.factory('handlers', ['$rootScope', '$log', 'models', 'plugins', 'notific
             if (buffer.lines.length > 0) {
                 var old_date = new Date(buffer.lines[buffer.lines.length - 1].date),
                     new_date = new Date(message.date);
-                injectDateChangeMessageIfNeeded(buffer, old_date, new_date);
+                injectDateChangeMessageIfNeeded(buffer, manually, old_date, new_date);
             }
 
             message = plugins.PluginManager.contentForMessage(message);
@@ -141,10 +188,16 @@ weechat.factory('handlers', ['$rootScope', '$log', 'models', 'plugins', 'notific
                 buffer = new models.Buffer(bufferInfos[i]);
                 models.addBuffer(buffer);
                 // Switch to first buffer on startup
-                if (i === 0) {
+                var shouldResume = bufferResume.shouldResume(buffer);
+                if(shouldResume){
                     models.setActiveBuffer(buffer.id);
                 }
             }
+        }
+        // If there was no buffer to autmatically load, go to the first one.
+        if (!bufferResume.wasAbleToResume()) {
+            var first = bufferInfos[0].pointers[0];
+            models.setActiveBuffer(first);
         }
     };
 
@@ -253,13 +306,14 @@ weechat.factory('handlers', ['$rootScope', '$log', 'models', 'plugins', 'notific
             old.server = localvars.server;
             old.serverSortKey = old.plugin + "." + old.server +
                 (old.type === "server" ? "" :  ("." + old.shortName));
+            old.pinned = localvars.pinned === "true";
         }
     };
 
     var handleBufferTypeChanged = function(message) {
         var obj = message.objects[0].content[0];
         var buffer = obj.pointers[0];
-        var old = models.getBuffer(buffer);
+        //var old = models.getBuffer(buffer);
         // 0 = formatted (normal); 1 = free
         buffer.bufferType = obj.type;
     };
@@ -284,7 +338,7 @@ weechat.factory('handlers', ['$rootScope', '$log', 'models', 'plugins', 'notific
             var buffer = models.getBuffer(last_line.buffer);
             if (buffer.lines.length > 0) {
                 var last_date = new Date(buffer.lines[buffer.lines.length - 1].date);
-                injectDateChangeMessageIfNeeded(buffer, last_date, new Date());
+                injectDateChangeMessageIfNeeded(buffer, true, last_date, new Date());
             }
         }
     };
@@ -293,23 +347,41 @@ weechat.factory('handlers', ['$rootScope', '$log', 'models', 'plugins', 'notific
      * Handle answers to hotlist request
      */
     var handleHotlistInfo = function(message) {
-        if (message.objects.length === 0) {
-            return;
+        // Hotlist includes only buffers with unread counts so first we
+        // iterate all our buffers and resets the counts.
+        _.each(models.getBuffers(), function(buffer) {
+            buffer.unread = 0;
+            buffer.notification = 0;
+        });
+        if (message.objects.length > 0) {
+            var hotlist = message.objects[0].content;
+            hotlist.forEach(function(l) {
+                var buffer = models.getBuffer(l.buffer);
+                // If buffer is active in gb, but not active in WeeChat the
+                // hotlist in WeeChat will increase but we should ignore that
+                // in gb.
+                if (buffer.active) {
+                    return;
+                }
+                // 1 is message
+                buffer.unread = l.count[1];
+                // 2 is private
+                // Use += so count[2] or count[3] doesn't overwrite each other
+                buffer.notification += l.count[2];
+                // 3 is highlight
+                // Use += so count[2] or count[3] doesn't overwrite each other
+                buffer.notification += l.count[3];
+                /* Since there is unread messages, we can guess
+                * what the last read line is and update it accordingly
+                */
+                var unreadSum = _.reduce(l.count, function(memo, num) { return memo + num; }, 0);
+                buffer.lastSeen = buffer.lines.length - 1 - unreadSum;
+            });
         }
-        var hotlist = message.objects[0].content;
-        hotlist.forEach(function(l) {
-            var buffer = models.getBuffer(l.buffer);
-            // 1 is message
-            buffer.unread += l.count[1];
-            // 2 is private
-            buffer.notification += l.count[2];
-            // 3 is highlight
-            buffer.notification += l.count[3];
-            /* Since there is unread messages, we can guess
-            * what the last read line is and update it accordingly
-            */
-            var unreadSum = _.reduce(l.count, function(memo, num) { return memo + num; }, 0);
-            buffer.lastSeen = buffer.lines.length - 1 - unreadSum;
+        // the unread badges in the bufferlist doesn't update if we don't do this
+        setTimeout(function() {
+            $rootScope.$apply();
+            $rootScope.$emit('notificationChanged');
         });
     };
 
@@ -392,6 +464,7 @@ weechat.factory('handlers', ['$rootScope', '$log', 'models', 'plugins', 'notific
 
     return {
         handleVersionInfo: handleVersionInfo,
+        handleConfValue: handleConfValue,
         handleEvent: handleEvent,
         handleLineInfo: handleLineInfo,
         handleHotlistInfo: handleHotlistInfo,

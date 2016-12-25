@@ -1,7 +1,7 @@
 (function() {
 'use strict';
 
-var weechat = angular.module('weechat', ['ngRoute', 'localStorage', 'weechatModels', 'plugins', 'IrcUtils', 'ngSanitize', 'ngWebsockets', 'ngTouch'], ['$compileProvider', function($compileProvider) {
+var weechat = angular.module('weechat', ['ngRoute', 'localStorage', 'weechatModels', 'bufferResume', 'plugins', 'IrcUtils', 'ngSanitize', 'ngWebsockets', 'ngTouch'], ['$compileProvider', function($compileProvider) {
     // hacky way to be able to find out if we're in debug mode
     weechat.compileProvider = $compileProvider;
 }]);
@@ -12,8 +12,8 @@ weechat.config(['$compileProvider', function ($compileProvider) {
     }
 }]);
 
-weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout', '$log', 'models', 'connection', 'notifications', 'utils', 'settings',
-    function ($rootScope, $scope, $store, $timeout, $log, models, connection, notifications, utils, settings) {
+weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout', '$log', 'models', 'bufferResume', 'connection', 'notifications', 'utils', 'settings',
+    function ($rootScope, $scope, $store, $timeout, $log, models, bufferResume, connection, notifications, utils, settings) {
 
     window.openBuffer = function(channel) {
         $scope.openBuffer(channel);
@@ -21,8 +21,10 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
     };
 
     $scope.command = '';
-    $scope.themes = ['dark', 'light'];
+    $scope.themes = ['dark', 'light', 'black', 'dark-spacious', 'blue', 'base16-default', 'base16-light', 'base16-mocha', 'base16-solarized-dark', 'base16-solarized-light'];
 
+    // Initialise all our settings, this needs to include all settings
+    // or else they won't be saved to the localStorage.
     settings.setDefaults({
         'theme': 'dark',
         'host': 'localhost',
@@ -36,32 +38,19 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
         'hotlistsync': true,
         'orderbyserver': true,
         'useFavico': true,
-        'showtimestamp': true,
-        'showtimestampSeconds': false,
+        'soundnotification': true,
         'fontsize': '14px',
         'fontfamily': (utils.isMobileUi() ? 'sans-serif' : 'Inconsolata, Consolas, Monaco, Ubuntu Mono, monospace'),
         'readlineBindings': false,
         'enableJSEmoji': (utils.isMobileUi() ? false : true),
         'enableMathjax': false,
+        'customCSS': '',
+        "currentlyViewedBuffers":{},
     });
     $scope.settings = settings;
 
-    // From: http://stackoverflow.com/a/18539624 by StackOverflow user "plantian"
     $rootScope.countWatchers = function () {
-        var q = [$rootScope], watchers = 0, scope;
-        while (q.length > 0) {
-            scope = q.pop();
-            if (scope.$$watchers) {
-                watchers += scope.$$watchers.length;
-            }
-            if (scope.$$childHead) {
-                q.push(scope.$$childHead);
-            }
-            if (scope.$$nextSibling) {
-                q.push(scope.$$nextSibling);
-            }
-        }
-        $log.debug(watchers);
+        $log.debug($rootScope.$$watchersCount);
     };
 
     $scope.isinstalled = (function() {
@@ -114,6 +103,18 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
         }
     })();
 
+    // Show a TLS warning if GB was loaded over an unencrypted connection,
+    // except for local instances (testing or electron)
+    $scope.show_tls_warning = (window.location.protocol !== "https:") &&
+        (["localhost", "127.0.0.1", "::1"].indexOf(window.location.hostname) === -1) &&
+        !window.is_electron;
+
+    if (window.is_electron) {
+        // Use packaged emojione sprite in the electron app
+        emojione.imageType = 'svg';
+        emojione.sprites = true;
+        emojione.imagePathSVGSprites = './3rdparty/emojione.sprites.svg';
+    }
 
     $rootScope.isWindowFocused = function() {
         if (typeof $scope.documentHidden === "undefined") {
@@ -150,11 +151,9 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
     $rootScope.$on('activeBufferChanged', function(event, unreadSum) {
         var ab = models.getActiveBuffer();
 
-        // Discard surplus lines. This is done *before* lines are fetched because that saves us the effort of special handling for the
-        // case where a buffer is opened for the first time ;)
-        var minRetainUnread = ab.lines.length - unreadSum + 5;  // do not discard unread lines and keep 5 additional lines for context
-        var surplusLines = ab.lines.length - (2 * $scope.lines_per_screen + 10);  // retain up to 2*(screenful + 10) + 10 lines because magic numbers
-        var linesToRemove = Math.min(minRetainUnread, surplusLines);
+        // Discard unread lines above 2 screenfuls. We can click through to get more if needs be
+        // This is to keep GB responsive when loading buffers which have seen a lot of traffic. See issue #859
+        var linesToRemove = ab.lines.length - (2 * $scope.lines_per_screen + 10);
 
         if (linesToRemove > 0) {
             ab.lines.splice(0, linesToRemove);  // remove the lines from the buffer
@@ -264,8 +263,11 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
         models.reinitialize();
         $rootScope.$emit('notificationChanged');
         $scope.connectbutton = 'Connect';
+        $scope.connectbuttonicon = 'glyphicon-chevron-right';
+        bufferResume.reset();
     });
     $scope.connectbutton = 'Connect';
+    $scope.connectbuttonicon = 'glyphicon-chevron-right';
 
     $scope.getBuffers = models.getBuffers.bind(models);
 
@@ -386,30 +388,22 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
             notifications.updateFavico();
         } else {
             $rootScope.favico.reset();
+            notifications.updateBadge('');
         }
     });
 
     // To prevent unnecessary loading times for users who don't
-    // want MathJax, load it only if the setting is enabled.
+    // want LaTeX math, load it only if the setting is enabled.
     // This also fires when the page is loaded if enabled.
+    // Note that this says MathJax but we switched to KaTeX
     settings.addCallback('enableMathjax', function(enabled) {
         if (enabled && !$rootScope.mathjax_init) {
             // Load MathJax only once
             $rootScope.mathjax_init = true;
-            (function () {
-                var head = document.getElementsByTagName("head")[0], script;
-                script = document.createElement("script");
-                script.type = "text/x-mathjax-config";
-                script[(window.opera ? "innerHTML" : "text")] =
-                    "MathJax.Hub.Config({\n" +
-                    "  tex2jax: { inlineMath: [['$$','$$'], ['\\\\(','\\\\)']], displayMath: [['\\\\[','\\\\]']] },\n" +
-                    "});";
-                head.appendChild(script);
-                script = document.createElement("script");
-                script.type = "text/javascript";
-                script.src  = "//cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS_HTML";
-                head.appendChild(script);
-            })();
+
+            utils.inject_css("https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.5.1/katex.min.css");
+            utils.inject_script("https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.5.1/katex.min.js");
+            utils.inject_script("https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.5.1/contrib/auto-render.min.js");
         }
     });
 
@@ -423,14 +417,25 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
         }
 
         // Load new theme
-        (function() {
-            var elem = document.createElement("link");
-            elem.rel = "stylesheet";
-            elem.href = "css/themes/" + theme + ".css";
-            elem.media = "screen";
-            elem.id = "themeCSS";
-            document.getElementsByTagName("head")[0].appendChild(elem);
-        })();
+        utils.inject_css("css/themes/" + theme + ".css", "themeCSS");
+    });
+
+    settings.addCallback('customCSS', function(css) {
+        // We need to delete the old tag and add a new one so that the browser
+        // notices the change. Thus, first remove old custom CSS.
+        var old_css = document.getElementById('custom-css-tag');
+        if (old_css) {
+            old_css.parentNode.removeChild(old_css);
+        }
+
+        // Create new CSS tag
+        var new_css = document.createElement("style");
+        new_css.type = "text/css";
+        new_css.id = "custom-css-tag";
+        new_css.appendChild(document.createTextNode(css));
+        // Append it to the <head> tag
+        var heads = document.getElementsByTagName("head");
+        heads[0].appendChild(new_css);
     });
 
 
@@ -534,6 +539,17 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
         return connection.fetchMoreLines(numLines);
     };
 
+    $scope.infiniteScroll = function() {
+        // Check if we are already fetching
+        if ($rootScope.loadingLines) {
+            return;
+        }
+        var buffer = models.getActiveBuffer();
+        if (!buffer.allLinesFetched) {
+            $scope.fetchMoreLines();
+        }
+    };
+
     $rootScope.updateBufferBottom = function(bottom) {
             var eob = document.getElementById("end-of-buffer");
             var bl = document.getElementById('bufferlines');
@@ -582,11 +598,14 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
         $rootScope.securityError = false;
         $rootScope.errorMessage = false;
         $rootScope.bufferBottom = true;
-        $scope.connectbutton = 'Connecting ...';
+        $scope.connectbutton = 'Connecting';
+        $scope.connectbuttonicon = 'glyphicon-refresh glyphicon-spin';
         connection.connect(settings.host, settings.port, $scope.password, settings.ssl);
     };
     $scope.disconnect = function() {
         $scope.connectbutton = 'Connect';
+        $scope.connectbuttonicon = 'glyphicon-chevron-right';
+        bufferResume.reset();
         connection.disconnect();
     };
     $scope.reconnect = function() {
@@ -663,6 +682,11 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
             // Always show core buffer in the list (issue #438)
             // Also show server buffers in hierarchical view
             if (buffer.fullName === "core.weechat" || (settings.orderbyserver && buffer.type === 'server')) {
+                return true;
+            }
+
+            // Always show pinned buffers
+            if (buffer.pinned) {
                 return true;
             }
             return (buffer.unread > 0 || buffer.notification > 0) && !buffer.hidden;
@@ -743,19 +767,58 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
     $scope.handleSearchBoxKey = function($event) {
         // Support different browser quirks
         var code = $event.keyCode ? $event.keyCode : $event.charCode;
+
         // Handle escape
         if (code === 27) {
             $event.preventDefault();
             $scope.search = '';
         } // Handle enter
         else if (code === 13) {
+            var index;
             $event.preventDefault();
             if ($scope.filteredBuffers.length > 0) {
-                $scope.setActiveBuffer($scope.filteredBuffers[0].id);
+                // Go to highlighted buffer if available
+                // or first one
+                if ($scope.search_highlight_key) {
+                    index = $scope.search_highlight_key;
+                } else {
+                    index = 0;
+                }
+                $scope.setActiveBuffer($scope.filteredBuffers[index].id);
             }
             $scope.search = '';
+        } // Handle arrow up
+        else if (code === 38) {
+            $event.preventDefault();
+            if ($scope.search_highlight_key && $scope.search_highlight_key > 0) {
+                $scope.search_highlight_key = $scope.search_highlight_key - 1;
+            }
+        } // Handle arrow down and tab
+        else if (code === 40 || code === 9) {
+            $event.preventDefault();
+            $scope.search_highlight_key = $scope.search_highlight_key + 1;
+        } // Set highlight key to zero on all other keypress
+        else {
+            $scope.search_highlight_key = 0;
         }
     };
+
+    $rootScope.supports_formatting_date = (function() {
+        // function toLocaleDateStringSupportsLocales taken from MDN:
+        // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/toLocaleDateString#Checking_for_support_for_locales_and_options_arguments
+        try {
+            new Date().toLocaleDateString('i');
+        } catch (e) {
+            if (e.name !== 'RangeError') {
+                $log.info("Browser does not support toLocaleDateString()," +
+                          " falling back to en-US");
+            }
+            return e.name === 'RangeError';
+        }
+        $log.info("Browser does not support toLocaleDateString()," +
+                  " falling back to en-US");
+        return false;
+    })();
 
     // Prevent user from accidentally leaving the page
     window.onbeforeunload = function(event) {
@@ -788,7 +851,8 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
             $rootScope.securityError = false;
             $rootScope.errorMessage = false;
             $rootScope.bufferBottom = true;
-            $scope.connectbutton = 'Connecting ...';
+            $scope.connectbutton = 'Connecting';
+            $scope.connectbuttonicon = 'glyphicon-chevron-right';
             connection.connect(host, port, password, ssl);
         }
     };
