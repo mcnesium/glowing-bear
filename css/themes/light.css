@@ -16,6 +16,14 @@ html {
     color: #ccc;
 }
 
+/* override bootstrap blue */
+a {
+	color: #444;
+}
+a:focus, a:hover {
+    color: #777;
+}
+
 /* fix for mobile firefox which ignores :hover */
 .nav-pills > li > a:active, .nav-pills > li > a:active span {
     color: #eee;
@@ -51,7 +59,7 @@ li.notification {
 }
 
 ::-webkit-scrollbar-track-piece  {
-    background-color: black;
+    background-color: #ccc;
 }
 ::-webkit-scrollbar-thumb:vertical {
     height: 15px;
