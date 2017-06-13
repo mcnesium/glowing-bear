@@ -32,7 +32,7 @@ a:focus, a:hover {
 
 .nav-pills > li.highlight > a, .nav-pills > li.highlight > a span {
     color: #fff;
-    background: #428BCA;
+    background: #666;
 }
 
 .btn-send,
@@ -91,7 +91,15 @@ select.form-control, select option, input[type=text], input[type=password], #sen
 .nav-pills > li > a:hover, .nav-pills > li > a:hover span {
     color: #555;
 }
-
+.nav-pills>li.active>a,
+.nav-pills>li.active>a:focus,
+.nav-pills>li.active>a:hover {
+    background-color: #666;
+}
+.nav-pills > li.active > a:hover,
+.nav-pills > li.active > a:hover span {
+    color: #fff;
+}
 .color-light-green {
     color: chartreuse;
 }
