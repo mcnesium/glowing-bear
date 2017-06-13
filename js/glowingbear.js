@@ -1,6 +1,13 @@
 (function() {
 'use strict';
 
+// cordova splash screen
+document.addEventListener("deviceready", function () {
+    if (navigator.splashscreen !== undefined) {
+        navigator.splashscreen.hide();
+    }
+}, false);
+
 var weechat = angular.module('weechat', ['ngRoute', 'localStorage', 'weechatModels', 'bufferResume', 'plugins', 'IrcUtils', 'ngSanitize', 'ngWebsockets', 'ngTouch'], ['$compileProvider', function($compileProvider) {
     // hacky way to be able to find out if we're in debug mode
     weechat.compileProvider = $compileProvider;
@@ -21,7 +28,7 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
     };
 
     $scope.command = '';
-    $scope.themes = ['dark', 'light', 'black', 'dark-spacious', 'blue', 'base16-default', 'base16-light', 'base16-mocha', 'base16-solarized-dark', 'base16-solarized-light'];
+    $scope.themes = ['dark', 'light', 'black', 'dark-spacious', 'blue', 'base16-default', 'base16-light', 'base16-mocha', 'base16-ocean-dark', 'base16-solarized-dark', 'base16-solarized-light'];
 
     // Initialise all our settings, this needs to include all settings
     // or else they won't be saved to the localStorage.
@@ -37,13 +44,14 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
         'onlyUnread': false,
         'hotlistsync': true,
         'orderbyserver': true,
-        'useFavico': true,
+        'useFavico': !utils.isCordova(),
         'soundnotification': true,
         'fontsize': '14px',
         'fontfamily': (utils.isMobileUi() ? 'sans-serif' : 'Inconsolata, Consolas, Monaco, Ubuntu Mono, monospace'),
         'readlineBindings': false,
-        'enableJSEmoji': (utils.isMobileUi() ? false : true),
+        'enableJSEmoji': !utils.isMobileUi(),
         'enableMathjax': false,
+        'enableQuickKeys': true,
         'customCSS': '',
         "currentlyViewedBuffers":{},
     });
@@ -52,22 +60,6 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
     $rootScope.countWatchers = function () {
         $log.debug($rootScope.$$watchersCount);
     };
-
-    $scope.isinstalled = (function() {
-        // Check for firefox & app installed
-        if (navigator.mozApps !== undefined) {
-            navigator.mozApps.getSelf().onsuccess = function _onAppReady(evt) {
-                var app = evt.target.result;
-                if (app) {
-                    return true;
-                } else {
-                    return false;
-                }
-            };
-        } else {
-            return false;
-        }
-    }());
 
 
     // Detect page visibility attributes
@@ -104,10 +96,10 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
     })();
 
     // Show a TLS warning if GB was loaded over an unencrypted connection,
-    // except for local instances (testing or electron)
+    // except for local instances (testing, cordova, or electron)
     $scope.show_tls_warning = (window.location.protocol !== "https:") &&
         (["localhost", "127.0.0.1", "::1"].indexOf(window.location.hostname) === -1) &&
-        !window.is_electron;
+        !window.is_electron && !utils.isCordova();
 
     if (window.is_electron) {
         // Use packaged emojione sprite in the electron app
@@ -170,7 +162,7 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
             connection.requestNicklist(ab.id, function() {
                 $scope.showNicklist = $scope.updateShowNicklist();
                 // Scroll after nicklist has been loaded, as it may break long lines
-                $rootScope.scrollWithBuffer(true);
+                $rootScope.scrollWithBuffer();
             });
         } else {
             // Check if we should show nicklist or not
@@ -203,7 +195,7 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
                             }
                         };
                         $rootScope.updateBufferBottom(true);
-                        $rootScope.scrollWithBuffer(true);
+                        $rootScope.scrollWithBuffer();
                         bl.onscroll = _.debounce(function() {
                             $rootScope.updateBufferBottom();
                         }, 80);
@@ -219,11 +211,12 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
         });
 
         $timeout(function() {
-            $rootScope.scrollWithBuffer(true);
+            $rootScope.scrollWithBuffer();
         });
 
         // Clear search term on buffer change
         $scope.search = '';
+        $scope.search_placeholder = 'Search';
 
         if (!utils.isMobileUi()) {
             // This needs to happen asynchronously to prevent the enter key handler
@@ -240,7 +233,9 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
         }
     });
 
-    $rootScope.favico = new Favico({animation: 'none'});
+    if (!utils.isCordova()) {
+        $rootScope.favico = new Favico({animation: 'none'});
+    }
     $scope.notifications = notifications.unreadCount('notification');
     $scope.unread = notifications.unreadCount('unread');
 
@@ -249,7 +244,7 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
         $scope.notifications = notifications.unreadCount('notification');
         $scope.unread = notifications.unreadCount('unread');
 
-        if (settings.useFavico && $rootScope.favico) {
+        if (!utils.isCordova() && settings.useFavico && $rootScope.favico) {
             notifications.updateFavico();
         }
     });
@@ -258,7 +253,12 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
         // Reset title
         $rootScope.pageTitle = '';
         $rootScope.notificationStatus = '';
+
+        // cancel outstanding notifications (incl cordova)
         notifications.cancelAll();
+        if (window.plugin !== undefined && window.plugin.notification !== undefined && window.plugin.notification.local !== undefined) {
+            window.plugin.notification.local.cancelAll();
+        }
 
         models.reinitialize();
         $rootScope.$emit('notificationChanged');
@@ -375,15 +375,31 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
     };
 
     // Watch model and update channel sorting when it changes
-    settings.addCallback('orderbyserver', function(orderbyserver) {
-        $rootScope.predicate = orderbyserver ? 'serverSortKey' : 'number';
-    });
+    var set_filter_predicate = function(orderbyserver) {
+        if ($rootScope.showJumpKeys) {
+            $rootScope.predicate = '$jumpKey';
+        } else if (orderbyserver) {
+            $rootScope.predicate = 'serverSortKey';
+        } else {
+            $rootScope.predicate = 'number';
+        }
+    };
+    settings.addCallback('orderbyserver', set_filter_predicate);
+    // convenience wrapper for jump keys
+    $rootScope.refresh_filter_predicate = function() {
+        set_filter_predicate(settings.orderbyserver);
+    };
 
     settings.addCallback('useFavico', function(useFavico) {
         // this check is necessary as this is called on page load, too
         if (!$rootScope.connected) {
             return;
         }
+
+        if (utils.isCordova()) {
+            return; // cordova doesn't have a favicon
+        }
+
         if (useFavico) {
             notifications.updateFavico();
         } else {
@@ -397,7 +413,8 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
     // This also fires when the page is loaded if enabled.
     // Note that this says MathJax but we switched to KaTeX
     settings.addCallback('enableMathjax', function(enabled) {
-        if (enabled && !$rootScope.mathjax_init) {
+        // no latex math support for cordova right now
+        if (!utils.isCordova() && enabled && !$rootScope.mathjax_init) {
             // Load MathJax only once
             $rootScope.mathjax_init = true;
 
@@ -445,6 +462,15 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
     });
     // Update font size when changed
     settings.addCallback('fontsize', function(fontsize) {
+        if (typeof(fontsize) === "number") {
+            // settings module recognizes a fontsize without unit it as a number
+            // and converts, we need to convert back
+            fontsize = fontsize.toString();
+        }
+        // If no unit is specified, it should be pixels
+        if (fontsize.match(/^[0-9]+$/)) {
+            fontsize += 'px';
+        }
         utils.changeClassStyle('favorite-font', 'fontSize', fontsize);
     });
 
@@ -558,7 +584,7 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
             }
             $rootScope.bufferBottom = eob.offsetTop <= bl.scrollTop + bl.clientHeight;
     };
-    $rootScope.scrollWithBuffer = function(scrollToReadmarker, moreLines) {
+    $rootScope.scrollWithBuffer = function(moreLines) {
         // First, get scrolling status *before* modification
         // This is required to determine where we were in the buffer pre-change
         var bl = document.getElementById('bufferlines');
@@ -569,14 +595,9 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
             // Determine if we want to scroll at all
             // Give the check 3 pixels of slack so you don't have to hit
             // the exact spot. This fixes a bug in some browsers
-            if (((scrollToReadmarker || moreLines) && sTop < sVal) || (Math.abs(sTop - sVal) < 3)) {
-                var readmarker = document.querySelector(".readmarker");
-                if (scrollToReadmarker && readmarker) {
-                    // Switching channels, scroll to read marker
-                    bl.scrollTop = readmarker.offsetTop - readmarker.parentElement.scrollHeight + readmarker.scrollHeight;
-                } else if (moreLines) {
-                    // We fetched more lines but the read marker is still out of view
-                    // Keep the scroll position constant
+            if ((moreLines && sTop < sVal) || (Math.abs(sTop - sVal) < 3)) {
+                if (moreLines) {
+                    // We fetched more lines, keep the scroll position constant
                     bl.scrollTop = bl.scrollHeight - bl.clientHeight - sVal;
                 } else {
                     // New message, scroll with buffer (i.e. to bottom)
@@ -611,30 +632,6 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
     $scope.reconnect = function() {
         var bufferId = models.getActiveBuffer().id;
         connection.attemptReconnect(bufferId, 3000);
-    };
-
-//XXX this is a bit out of place here, either move up to the rest of the firefox install code or remove
-    $scope.install = function() {
-        if (navigator.mozApps !== undefined) {
-            // Find absolute url with trailing '/' or '/index.html' removed
-            var base_url = location.protocol + '//' + location.host +
-                location.pathname.replace(/\/(index\.html)?$/, '');
-            var request = navigator.mozApps.install(base_url + '/manifest.webapp');
-            request.onsuccess = function () {
-                $scope.isinstalled = true;
-                // Save the App object that is returned
-                var appRecord = this.result;
-                // Start the app.
-                appRecord.launch();
-                alert('Installation successful!');
-            };
-            request.onerror = function () {
-                // Display the error information from the DOMError object
-                alert('Install failed, error: ' + this.error.name);
-            };
-        } else {
-            alert('Sorry. Only supported in Firefox v26+');
-        }
     };
 
     $scope.showModal = function(elementId) {
@@ -692,6 +689,25 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
             return (buffer.unread > 0 || buffer.notification > 0) && !buffer.hidden;
         }
         return !buffer.hidden;
+    };
+
+    // filter bufferlist for search or jump key
+    $rootScope.bufferlistfilter = function(buffer) {
+        if ($rootScope.showJumpKeys) {
+            // filter by jump key
+            if ($rootScope.jumpDecimal === undefined) {
+                // no digit input yet, show all buffers
+                return true;
+            } else {
+                var min_jumpKey = 10 * $rootScope.jumpDecimal,
+                    max_jumpKey = 10 * ($rootScope.jumpDecimal + 1);
+                return (min_jumpKey <= buffer.$jumpKey) &&
+                    (buffer.$jumpKey < max_jumpKey);
+            }
+        } else {
+            // filter by buffer name
+            return buffer.fullName.toLowerCase().indexOf($scope.search.toLowerCase()) !== -1;
+        }
     };
 
     // Watch model and update show setting when it changes
@@ -833,7 +849,10 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
             if ($rootScope.connected) {
                 $scope.disconnect();
             }
-            $scope.favico.reset();
+
+            if (!utils.isCordova()) {
+                $scope.favico.reset();
+            }
         }
     };
 

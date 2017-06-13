@@ -14,7 +14,7 @@ weechat.directive('inputBar', function() {
             command: '=command'
         },
 
-        controller: ['$rootScope', '$scope', '$element', '$log', 'connection', 'imgur', 'models', 'IrcUtils', 'settings', function($rootScope,
+        controller: ['$rootScope', '$scope', '$element', '$log', 'connection', 'imgur', 'models', 'IrcUtils', 'settings', 'utils', function($rootScope,
                              $scope,
                              $element, //XXX do we need this? don't seem to be using it
                              $log,
@@ -22,11 +22,46 @@ weechat.directive('inputBar', function() {
                              imgur,
                              models,
                              IrcUtils,
-                             settings) {
+                             settings,
+                             utils) {
 
-            // E.g. Turn :smile: into the unicode equivalent
+            // Expose utils to be able to check if we're on a mobile UI
+            $scope.utils = utils;
+
+            // Emojify input. E.g. Turn :smile: into the unicode equivalent, but
+            // don't do replacements in the middle of a word (e.g. std::io::foo)
             $scope.inputChanged = function() {
-                $scope.command = emojione.shortnameToUnicode($scope.command);
+                var emojiRegex = /^(?:[\uD800-\uDBFF][\uDC00-\uDFFF])+$/, // *only* emoji
+                    changed = false,  // whether a segment was modified
+                    inputNode = $scope.getInputNode(),
+                    caretPos = inputNode.selectionStart,
+                    position = 0;  // current position in text
+
+                // use capturing group in regex to include whitespace in output array
+                var segments = $scope.command.split(/(\s+)/);
+                for (var i = 0; i < segments.length; i ++) {
+                    if (/\s+/.test(segments[i]) || emojiRegex.test(segments[i])) {
+                        // ignore whitespace and emoji-only segments
+                        position += segments[i].length;
+                        continue;
+                    }
+                    // emojify segment
+                    var emojified = emojione.shortnameToUnicode(segments[i]);
+                    if (emojiRegex.test(emojified)) {
+                        // If result consists *only* of emoji, adjust caret
+                        // position and replace segment with emojified version
+                        caretPos = caretPos - segments[i].length + emojified.length;
+                        segments[i] = emojified;
+                        changed = true;
+                    }
+                    position += segments[i].length;
+                }
+                if (changed) {  // Only re-assemble if something changed
+                    $scope.command = segments.join('');
+                    setTimeout(function() {
+                        inputNode.setSelectionRange(caretPos, caretPos);
+                    });
+                }
             };
 
             /*
@@ -242,17 +277,53 @@ weechat.directive('inputBar', function() {
                 var tmpIterCandidate = $scope.iterCandidate;
                 $scope.iterCandidate = null;
 
+                var bufferNumber;
+                var sortedBuffers;
+                var filteredBufferNum;
+                var activeBufferId;
+
+                // if Alt+J was pressed last...
+                if ($rootScope.showJumpKeys) {
+                    var cleanup = function() { // cleanup helper
+                        $rootScope.showJumpKeys = false;
+                        $rootScope.jumpDecimal = undefined;
+                        $scope.$parent.search = '';
+                        $scope.$parent.search_placeholder = 'Search';
+                        $rootScope.refresh_filter_predicate();
+                    };
+
+                    // ... we expect two digits now
+                    if (!$event.altKey && (code > 47 && code < 58)) {
+                        // first digit
+                        if ($rootScope.jumpDecimal === undefined) {
+                            $rootScope.jumpDecimal = code - 48;
+                            $event.preventDefault();
+                            $scope.$parent.search = $rootScope.jumpDecimal;
+                            $rootScope.refresh_filter_predicate();
+                        // second digit, jump to correct buffer
+                        } else {
+                            bufferNumber = ($rootScope.jumpDecimal * 10) + (code - 48);
+                            $scope.$parent.setActiveBuffer(bufferNumber, '$jumpKey');
+
+                            $event.preventDefault();
+                            cleanup();
+                        }
+                    } else {
+                        // Not a decimal digit, abort
+                        cleanup();
+                    }
+                }
+
                 // Left Alt+[0-9] -> jump to buffer
-                if ($event.altKey && !$event.ctrlKey && (code > 47 && code < 58)) {
+                if ($event.altKey && !$event.ctrlKey && (code > 47 && code < 58) && settings.enableQuickKeys) {
                     if (code === 48) {
                         code = 58;
                     }
-                    var bufferNumber = code - 48 - 1 ;
+                    bufferNumber = code - 48 - 1 ;
 
-                    var activeBufferId;
                     // quick select filtered entries
                     if (($scope.$parent.search.length || $scope.$parent.onlyUnread) && $scope.$parent.filteredBuffers.length) {
-                        var filteredBufferNum = $scope.$parent.filteredBuffers[bufferNumber];
+                        filteredBufferNum = $scope.$parent.filteredBuffers[bufferNumber];
                         if (filteredBufferNum !== undefined) {
                             activeBufferId = [filteredBufferNum.number, filteredBufferNum.id];
                         }
@@ -260,7 +331,7 @@ weechat.directive('inputBar', function() {
                         // Map the buffers to only their numbers and IDs so we don't have to
                         // copy the entire (possibly very large) buffer object, and then sort
                         // the buffers according to their WeeChat number
-                        var sortedBuffers = _.map(models.getBuffers(), function(buffer) {
+                        sortedBuffers = _.map(models.getBuffers(), function(buffer) {
                             return [buffer.number, buffer.id];
                         }).sort(function(left, right) {
                             // By default, Array.prototype.sort() sorts alphabetically.
@@ -367,6 +438,16 @@ weechat.directive('inputBar', function() {
                     connection.sendHotlistClearAll();
                 }
 
+                // Alt+J -> Jump to buffer
+                if ($event.altKey && (code === 106 || code === 74)) {
+                    $event.preventDefault();
+                    // reset search state and show jump keys
+                    $scope.$parent.search = '';
+                    $scope.$parent.search_placeholder = 'Number';
+                    $rootScope.showJumpKeys = true;
+                    return true;
+                }
+
                 var caretPos;
 
                 // Arrow up -> go up in history
@@ -463,7 +544,7 @@ weechat.directive('inputBar', function() {
                     // Ctrl-w
                     } else if (code == 87) {
                         var trimmedValue = $scope.command.slice(0, caretPos);
-                        var lastSpace = trimmedValue.lastIndexOf(' ') + 1;
+                        var lastSpace = trimmedValue.replace(/\s+$/, '').lastIndexOf(' ') + 1;
                         $scope.command = $scope.command.slice(0, lastSpace) + $scope.command.slice(caretPos, $scope.command.length);
                         setTimeout(function() {
                             inputNode.setSelectionRange(lastSpace, lastSpace);
@@ -476,7 +557,7 @@ weechat.directive('inputBar', function() {
                 }
 
                 // Alt key down -> display quick key legend
-                if ($event.type === "keydown" && code === 18 && !$event.ctrlKey && !$event.shiftKey) {
+                if ($event.type === "keydown" && code === 18 && !$event.ctrlKey && !$event.shiftKey && settings.enableQuickKeys) {
                     $rootScope.showQuickKeys = true;
                 }
             };
@@ -496,6 +577,17 @@ weechat.directive('inputBar', function() {
                     }, 1000);
                     return true;
                 }
+            };
+
+            $scope.handleCompleteNickButton = function($event) {
+                $event.preventDefault();
+                $scope.completeNick();
+
+                setTimeout(function() {
+                    $scope.getInputNode().focus();
+                }, 0);
+
+                return true;
             };
         }]
     };

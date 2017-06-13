@@ -35,6 +35,8 @@ weechat.factory('connection',
 
             // Helper methods for initialization commands
             var _initializeConnection = function(passwd) {
+                // Escape comma in password (#937)
+                passwd = passwd.replace(',', '\\,');
                 // This is not the proper way to do this.
                 // WeeChat does not send a confirmation for the init.
                 // Until it does, We need to "assume" that formatInit
@@ -503,10 +505,8 @@ weechat.factory('connection',
             }
             $rootScope.loadingLines = false;
 
-            // Only scroll to read marker if we didn't have all unread lines previously, but have them now
-            var scrollToReadmarker = !hadAllUnreadLines && buffer.lastSeen >= 0;
-            // Scroll to correct position
-            $rootScope.scrollWithBuffer(scrollToReadmarker, true);
+            // "Scroll" to maintain position
+            $rootScope.scrollWithBuffer(/* moreLines */ true);
         });
     };
 
