@@ -34,7 +34,7 @@ weechat.controller('WeechatCtrl', ['$rootScope', '$scope', '$store', '$timeout',
     // or else they won't be saved to the localStorage.
     settings.setDefaults({
         'theme': 'light',
-        'host': 'fluse.elektrat.de',
+        'host': 'localhost',
         'port': 9001,
         'ssl': (window.location.protocol === "https:"),
         'savepassword': false,
